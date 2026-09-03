@@ -834,6 +834,7 @@ const MessageComponent = React.memo(
           description={presentation?.description}
           resumePrompt={presentation?.recoveryPrompt}
           technicalDetails={presentation?.technicalDetails}
+          gatewayConnectUrl={presentation?.kind === "gateway-auth-required" ? presentation.connectUrl ?? null : undefined}
         />
       )
     }
@@ -929,6 +930,12 @@ interface ErrorMessageProps {
   resumePrompt?: string | null
   /** Error type, status, provider, code, response body — for bug reports and support. */
   technicalDetails?: string | null
+  /**
+   * Set (possibly null) only when the OpenWork Gateway rejected the request
+   * because the member must sign in: a URL opens the grant in the browser,
+   * null deep-links to Settings > AI providers instead.
+   */
+  gatewayConnectUrl?: string | null
 }
 
 /**
@@ -993,8 +1000,8 @@ function SessionErrorTechnicalDetails({ details, tone }: { details: string; tone
   )
 }
 
-function ErrorMessage({ error, description, resumePrompt, technicalDetails }: ErrorMessageProps) {
-  const { onResumeInterrupted, developerMode } = useMessageList()
+function ErrorMessage({ error, description, resumePrompt, technicalDetails, gatewayConnectUrl }: ErrorMessageProps) {
+  const { onResumeInterrupted, developerMode, dispatchAction } = useMessageList()
   // Status codes, provider names, and response bodies are for developers,
   // admins, and support — not the plain-language card end users see. They
   // surface only with Developer mode (Settings → Advanced), like the
@@ -1041,6 +1048,23 @@ function ErrorMessage({ error, description, resumePrompt, technicalDetails }: Er
             </div>
           </div>
           {details ? <SessionErrorTechnicalDetails details={details} tone="card" /> : null}
+          {gatewayConnectUrl !== undefined ? (
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="session-error-gateway-connect"
+              className="self-start"
+              onClick={() => {
+                if (gatewayConnectUrl) {
+                  void openDesktopUrl(gatewayConnectUrl)
+                  return
+                }
+                dispatchAction({ target: "settings", action: "open", section: "providers" })
+              }}
+            >
+              Connect
+            </Button>
+          ) : null}
         </div>
       </div>
     </Message>
