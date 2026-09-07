@@ -293,6 +293,35 @@ test("an existing Models subscriber can decline, enable and disable task analyti
   expect(afterOptOut.some((request) => request.method === "POST" && request.path.endsWith("/inference/analytics/events"))).toBe(false);
   await user.on(app).see({ text: "Keep working after turning off task analytics." });
   evidence.recordAssertionEvidence("Turning analytics off leaves the existing desktop conversation and selected model usable", "A new assistant reply arrived from the same selected model after disable; the independent HTTP witness observed no task-event uploads across opt-out, re-enable and 40 seconds of background reporting, the disabled-period task was absent, and the earlier conversation was still visible", true);
+  await world.seedPagination();
+  await webUser.reload();
+  await webUser.see({ text: "pagination-model-200" }, { timeoutMs: 60_000 });
+  const firstPage = record((await probe.api(world.den.admin, "/v1/inference/analytics/activity?days=30")).body);
+  expect(list(firstPage.events).at(-1)).toMatchObject({ id: "pagination-200" });
+  const oldCursor = record(firstPage.next).beforeId;
+  await webUser.click({ role: "button", label: "Load more activity" });
+  await webUser.see({ text: "pagination-model-400" });
+  expect((await probe.on(world.web).text()).match(/\bpagination-model-\d+\b/g)).toHaveLength(400);
+
+  await world.seedPagination(true);
+  // Automatic refresh must replace both the first page and its pagination chain.
+  await webUser.see({ text: "pagination-model-newest" }, { timeoutMs: 45_000 });
+  await webUser.notSee({ text: "pagination-model-400" });
+  const refreshed = record((await probe.api(world.den.admin, "/v1/inference/analytics/activity?days=30")).body);
+  expect(list(refreshed.events).at(-1)).toMatchObject({ id: "pagination-199" });
+  const freshCursor = record(refreshed.next).beforeId;
+  expect(freshCursor).not.toBe(oldCursor);
+  await webUser.click({ role: "button", label: "Load more activity" });
+  await webUser.see({ text: "pagination-model-200" });
+  await webUser.see({ text: "pagination-model-399" });
+  await webUser.notSee({ text: "pagination-model-400" });
+  await webUser.click({ role: "button", label: "Load more activity" });
+  await webUser.see({ text: "pagination-model-400" });
+  await webUser.notSee({ role: "button", label: "Load more activity" });
+  const seenModels = (await probe.on(world.web).text()).match(/\bpagination-model-(?:\d+|newest)\b/g);
+  expect(seenModels).toHaveLength(401);
+  expect(new Set(seenModels).size).toBe(401);
+  evidence.recordAssertionEvidence("Refreshing model activity preserves a complete traversal", "After loading 400 deterministic tasks, a newer event triggered automatic refresh. The refreshed first page ended at task 199; loading more recovered task 200 and ended at task 399 before the final page reached task 400. All 401 fixture tasks appeared exactly once, with no further page available.", true);
   expect((await api("/v1/org", { method: "DELETE" })).response.status).toBe(200);
   await world.verifyErasure();
   evidence.recordAssertionEvidence("Deleting a workspace erases its task analytics and stored export credentials", "Workspace deletion returned 200; an independent data-store witness found no retained history or analytics configuration", true);

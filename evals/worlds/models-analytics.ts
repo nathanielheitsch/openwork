@@ -82,6 +82,7 @@ export async function modelsAnalyticsWorld(seed: Seed) {
     den, web, orgId, memberId, witnessUrl, inferenceUrl,
     async upgradeAnalytics() { await arrange("migrate"); },
     async analyticsStoreUnavailable(unavailable: boolean) { await arrange(unavailable ? "pause-analytics" : "resume-analytics"); },
+    async seedPagination(newest = false) { await arrange(newest ? "pagination-newest" : "pagination"); },
     async anotherOrganization() { return provisionOrg(den.ref, {}); },
     async verifyErasure() { await arrange("assert-erased"); },
     async anotherSubscriber() {
