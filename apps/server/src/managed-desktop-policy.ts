@@ -60,7 +60,8 @@ class ManagedDesktopPolicy {
     let policy: DesktopConfig;
     try {
       const response = await externalFetch(`${session.baseUrl}/v1/me/desktop-config`, {
-        headers: { Authorization: `Bearer ${session.token}`, "x-openwork-legacy-org-id": session.orgId },
+        headers: { Accept: "application/json", Authorization: `Bearer ${session.token}`, "x-openwork-org-id": session.orgId, "x-openwork-legacy-org-id": session.orgId },
+        redirect: "error",
         signal: AbortSignal.timeout(10_000),
       });
       if (!response.ok) throw new Error("Policy request failed");
@@ -129,19 +130,32 @@ class ManagedDesktopPolicy {
       if (!session) throw new ApiError(403, "policy_unavailable", "Sign in to verify assigned models.");
       let assigned = false;
       try {
-        const response = await externalFetch(`${session.baseUrl}/v1/llm-providers`, {
-          headers: { Authorization: `Bearer ${session.token}`, "x-openwork-legacy-org-id": session.orgId },
-          signal: AbortSignal.timeout(10_000),
-        });
-        if (!response.ok) throw new Error("Catalog unavailable");
-        const catalog: unknown = await response.json();
-        if (!isRecord(catalog) || !Array.isArray(catalog.llmProviders)) throw new Error("Invalid catalog");
-        assigned = catalog.llmProviders.filter(isRecord).some((item) =>
-          (item.source === "openwork" ? "openwork" : item.id) === providerID && Array.isArray(item.models)
-          && item.models.filter(isRecord).some((model) => model.id === modelID));
+        const grants = await Promise.all([
+          { path: "/v1/llm-providers?scope=usable", field: "llmProviders", gateway: false },
+          { path: "/v1/inference-providers?scope=usable", field: "inferenceProviders", gateway: true },
+        ].map(async ({ path, field, gateway }) => {
+          const response = await externalFetch(`${session.baseUrl}${path}`, {
+            headers: { Accept: "application/json", Authorization: `Bearer ${session.token}`, "x-openwork-org-id": session.orgId, "x-openwork-legacy-org-id": session.orgId },
+            redirect: "error",
+            signal: AbortSignal.timeout(10_000),
+          });
+          // Older Den deployments have no gateway resource. Never treat other
+          // failures as an empty or cached grant list.
+          if (gateway && response.status === 404) return false;
+          if (!response.ok) throw new Error("Catalog unavailable");
+          const catalog: unknown = await response.json();
+          const items = isRecord(catalog) ? catalog[field] : null;
+          if (!Array.isArray(items)) throw new Error("Invalid catalog");
+          return items.filter(isRecord).some((item) =>
+            (gateway ? /^ipr_/.test(providerID) && item.source === "openwork_gateway" && item.status === "active" && item.credentialStatus === "ready" && item.id === providerID
+              : /^(?:lpr_|openwork$)/i.test(providerID) && (item.source === "openwork" ? "openwork" : item.id) === providerID)
+            && (item.organizationId === undefined || item.organizationId === session.orgId)
+            && Array.isArray(item.models) && item.models.filter(isRecord).some((model) => model.id === modelID));
+        }));
+        assigned = grants.some(Boolean);
       } catch { throw new ApiError(403, "policy_unavailable", "Your organization's assigned models could not be verified."); }
       if (generation !== this.generation) throw new ApiError(409, "policy_identity_changed", "The signed-in account changed. Retry the action.");
-      if (!(assigned && /^(?:lpr_|openwork$)/i.test(providerID) && models && typeof models === "object" && Object.hasOwn(models, modelID))) {
+      if (!(assigned && isRecord(models) && Object.hasOwn(models, modelID))) {
         throw new ApiError(403, "organization_model_denied", "Choose an AI model assigned by your organization.");
       }
     }
