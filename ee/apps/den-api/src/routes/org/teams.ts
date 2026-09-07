@@ -6,6 +6,7 @@ import {
   DesktopPolicyMemberTable,
   ExternalMcpConnectionAccessGrantTable,
   InvitationTable,
+  InferenceProviderAccessTable,
   LlmProviderAccessTable,
   MarketplaceAccessGrantTable,
   MemberTable,
@@ -18,6 +19,7 @@ import type { Hono } from "hono"
 import { describeRoute } from "hono-openapi"
 import { z } from "zod"
 import { db } from "../../db.js"
+import { invalidateTeamInferenceOAuth } from "../../llm/inference-provider-lifecycle.js"
 import { isScimManagedTeam } from "../../scim-groups.js"
 import {
   jsonValidator,
@@ -226,6 +228,7 @@ async function updateTeam(c: ResourceActionContext, payload: ResourceOrganizatio
     .map((row) => row.id)
 
   await db.transaction(async (tx) => {
+    if (memberIds) await invalidateTeamInferenceOAuth(tx, team.id)
     await tx.update(TeamTable).set({ name: nextName, updatedAt }).where(eq(TeamTable.id, team.id))
 
     if (memberIds) {
@@ -283,6 +286,8 @@ async function deleteTeam(c: ResourceActionContext, payload: ResourceOrganizatio
 
   await db.transaction(async (tx) => {
     const removedAt = new Date()
+    await invalidateTeamInferenceOAuth(tx, team.id)
+    await tx.delete(InferenceProviderAccessTable).where(eq(InferenceProviderAccessTable.team_id, team.id))
 
     await tx
       .update(InvitationTable)

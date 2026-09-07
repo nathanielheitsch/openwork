@@ -1,4 +1,5 @@
 import { and, eq, inArray, isNull, or } from "@openwork-ee/den-db/drizzle"
+import { invalidateTeamInferenceOAuth } from "./llm/inference-provider-lifecycle.js"
 import {
   AuthUserTable,
   MemberTable,
@@ -292,7 +293,13 @@ async function attachGroupMemberToTeam(input: {
 
 async function detachOwnedTeamMembership(member: ScimGroupMember) {
   if (member.teamMemberId) {
-    await db.delete(TeamMemberTable).where(eq(TeamMemberTable.id, member.teamMemberId))
+    const teamMemberId = member.teamMemberId
+    await db.transaction(async (tx) => {
+      const [membership] = await tx.select({ teamId: TeamMemberTable.teamId }).from(TeamMemberTable)
+        .where(eq(TeamMemberTable.id, teamMemberId))
+      if (membership) await invalidateTeamInferenceOAuth(tx, membership.teamId)
+      await tx.delete(TeamMemberTable).where(eq(TeamMemberTable.id, teamMemberId))
+    })
   }
 }
 

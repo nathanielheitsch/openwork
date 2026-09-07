@@ -20,6 +20,8 @@ import { createDenTypeId, normalizeDenTypeId } from "@openwork-ee/utils/typeid"
 import { revokeOrganizationApiKeysForMember } from "./api-keys.js"
 import { cache } from "./cache.js"
 import { revokeMembershipSessionCredentials } from "./credential-revocation.js"
+import { revokeGoogleCredentials, revokeInferenceCredentialsForMembers } from "./llm/inference-provider-lifecycle.js"
+import { ensureMemberInferenceKey } from "./inference.js"
 import { db } from "./db.js"
 import { env } from "./env.js"
 import {
@@ -534,6 +536,7 @@ async function insertMemberIfMissing(input: {
 
   const existingMember = existing[0] ?? null
   if (existingMember) {
+    await ensureMemberInferenceKey({ organizationId: input.organizationId, memberId: existingMember.id })
     return existingMember
   }
 
@@ -544,6 +547,7 @@ async function insertMemberIfMissing(input: {
     defaultRole: input.role,
   })
   if (invitedMember) {
+    await ensureMemberInferenceKey({ organizationId: input.organizationId, memberId: invitedMember.id })
     // Accepting an invite materializes membership data; cached org/member reads
     // must be invalidated here because hot cache hits do not re-check the DB.
     await cache.org.deleteMemberList(input.organizationId)
@@ -581,7 +585,7 @@ async function insertMemberIfMissing(input: {
   if (!created[0]) {
     throw new Error("failed_to_create_member")
   }
-
+  await ensureMemberInferenceKey({ organizationId: input.organizationId, memberId: created[0].id })
   return created[0]
 }
 
@@ -1078,6 +1082,7 @@ async function createOrganizationRecord(input: {
     userId: input.userId,
     role: "owner",
   })
+  await ensureMemberInferenceKey({ organizationId, memberId: ownerMemberId })
 
   await ensureDefaultDesktopPolicyForOrganization({
     organizationId,
@@ -1969,6 +1974,7 @@ export async function removeOrganizationMember(input: {
   memberId: MemberRow["id"]
   removedByOrgMemberId?: MemberRow["id"]
 }): Promise<MemberMutationResult> {
+  let gatewayCredentials: Awaited<ReturnType<typeof revokeInferenceCredentialsForMembers>> = []
   const removed = await db.transaction(async (tx): Promise<MemberMutationResult> => {
     const activeRows = await tx
       .select({ member: MemberTable, userId: AuthUserTable.id })
@@ -1995,6 +2001,7 @@ export async function removeOrganizationMember(input: {
     }
 
     const member = memberRow.member
+    gatewayCredentials = await revokeInferenceCredentialsForMembers(tx, [member.id])
 
     await tx
       .delete(ConnectedAccountTable)
@@ -2029,6 +2036,8 @@ export async function removeOrganizationMember(input: {
   if (!removed.ok) {
     return removed
   }
+
+  await revokeGoogleCredentials(gatewayCredentials)
 
   await revokeOrganizationApiKeysForMember({
     organizationId: input.organizationId,
