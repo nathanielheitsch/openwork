@@ -1055,10 +1055,6 @@ function ErrorMessage({ error, description, resumePrompt, technicalDetails, gate
               data-testid="session-error-gateway-connect"
               className="self-start"
               onClick={() => {
-                if (gatewayConnectUrl) {
-                  void openDesktopUrl(gatewayConnectUrl)
-                  return
-                }
                 dispatchAction({ target: "settings", action: "open", section: "providers" })
               }}
             >
