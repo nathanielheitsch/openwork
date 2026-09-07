@@ -3,14 +3,12 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { sql } from "@openwork-ee/den-db/drizzle";
-import { sentry } from "@sentry/hono/node";
 import { cors } from "hono/cors";
 import { Hono } from "hono";
-import { logger } from "hono/logger";
 import { z } from "zod";
 import { db } from "./db.js";
 import { env } from "./env.js";
-import { isSentryEnabled } from "./instrumentation.js";
+import { inferenceAccessLogger, sentryInferenceReporter } from "./inference-reporting.js";
 import { registerProxyRoutes } from "./proxy.js";
 import { registerRollupRoutes, runRollups } from "./rollups.js";
 import { registerWebhookRoutes } from "./webhooks.js";
@@ -26,33 +24,13 @@ function healthPath(path: string) {
   return path === "/health" || path === "/ready";
 }
 
-if (isSentryEnabled) {
-  const sentryMiddleware = sentry(app);
-  app.use("*", async (c, next) => {
-    if (healthPath(c.req.path)) {
-      await next();
-      return;
-    }
-
-    await sentryMiddleware(c, next);
-  });
-}
-
-const requestLogger = logger((message, ...rest) => {
-  if (/-->\s+\S+\s+\S+\s+[45]\d\d\b/.test(message)) {
-    console.error(message, ...rest);
-    return;
-  }
-  console.log(message, ...rest);
-});
-
 app.use("*", async (c, next) => {
   if (healthPath(c.req.path)) {
     await next();
     return;
   }
 
-  return requestLogger(c, next);
+  return inferenceAccessLogger(c, next);
 });
 
 if (env.corsOrigins.length > 0) {
@@ -65,6 +43,8 @@ if (env.corsOrigins.length > 0) {
         "Content-Type",
         "Authorization",
         "X-Api-Key",
+        "X-Goog-Api-Key",
+        "Api-Key",
         "X-Webhook-Signature",
         "X-Test-Connection",
         "X-Openwork-Session-Id",
@@ -83,7 +63,7 @@ app.get("/ready", async (c) => {
     await db.execute(sql`select 1`);
     return c.json({ ok: true, service: "inference", checks: { database: "ok" } });
   } catch (error) {
-    console.error("[readiness] inference database check failed", error);
+    console.error("[readiness] inference database check failed");
     return c.json({ ok: false, service: "inference", checks: { database: "error" } }, 503);
   }
 });
@@ -103,9 +83,10 @@ registerRollupRoutes(app, { adminToken: env.adminToken, runRollups });
 
 app.onError((error, c) => {
   if (error instanceof z.ZodError) {
-    return c.json({ error: "invalid_request", issues: error.issues }, 400);
+    return c.json({ error: "invalid_request" }, 400);
   }
-  console.error(error);
+  console.error("[inference] internal_server_error");
+  sentryInferenceReporter.handledError({ reason: "internal_server_error", route: "/api/v1/*", method: c.req.method, status: 500 });
   return c.json({ error: "internal_server_error" }, 500);
 });
 

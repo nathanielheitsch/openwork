@@ -49,7 +49,7 @@ function sseResponse(events: string[], init: ResponseInit = {}) {
 }
 
 async function waitForRows(rows: InferenceRequestLogRow[], count = 1) {
-  for (let attempt = 0; attempt < 50 && rows.length < count; attempt += 1) {
+  for (let attempt = 0; attempt < 50 && (rows.length < count || rows.some((row) => !row.completed_at)); attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 5))
   }
   assert.equal(rows.length, count)
@@ -200,10 +200,16 @@ function createTestServer(options: TestServerOptions = {}) {
     fetch: upstreamFetch,
     analytics: options.analytics,
     async loadOrganization(organizationId) {
-      return { id: organizationId, metadata: null }
+      return { id: organizationId, metadata: { inference: { enabled: true, tier: "tier1" } } }
     },
     async insertRequestLog(row) {
       logRows.push(row)
+    },
+    async updateRequestLog(row) {
+      const index = logRows.findIndex((entry) => entry.id === row.id)
+      if (index < 0) return false
+      logRows[index] = row
+      return true
     },
     reporter,
   })
@@ -370,10 +376,10 @@ test("summarizes ordinary organization payload shape without message content or 
   const payload = requireReportPayload(report)
   assert.equal(payload.stream, true)
   assert.equal(payload.messageCount, 2)
-  assert.deepEqual(payload.roles, ["system", "user"])
+  assert.equal(payload.toolCount, 1)
 })
 
-test("logs full debug organization payload with recursive credential redaction", async () => {
+test("never retains debug organization prompts or tool arguments", async () => {
   const { app, reports } = createTestServer({ organizationId: "org_01krnrcabhe8htwpbnsw0zk0bw" })
   const response = await app.fetch(inferenceRequest({
     method: "POST",
@@ -416,15 +422,10 @@ test("logs full debug organization payload with recursive credential redaction",
 
   assert.equal(response.status, 200)
   const report = requireRequestReport(reports)
-  assert.equal(report.payloadMode, "full")
+  assert.equal(report.payloadMode, "summary")
   const payloadText = JSON.stringify(report.payload)
-  assert.ok(payloadText.includes("debug prompt content"))
-  assert.ok(payloadText.includes("debug argument content"))
-  assert.ok(payloadText.includes("inference_key_123"))
-  assert.ok(payloadText.includes("api_key_id_123"))
-  assert.ok(payloadText.includes("provider_key_id_123"))
-  assert.ok(payloadText.includes("argument_api_key_id"))
-  assert.ok(payloadText.includes("128"))
+  assert.ok(!payloadText.includes("debug prompt content"))
+  assert.ok(!payloadText.includes("debug argument content"))
   assert.ok(!payloadText.includes("payload-secret-key"))
   assert.ok(!payloadText.includes("generic-key-secret"))
   assert.ok(!payloadText.includes("private-key-secret"))
@@ -438,11 +439,11 @@ test("logs full debug organization payload with recursive credential redaction",
   assert.ok(!payloadText.includes("argument-private-key"))
 })
 
-test("redacts credential-like incoming headers without redacting non-secret IDs", async () => {
+test("redacts all caller-controlled header values", async () => {
   const { app, reports } = createTestServer()
   const headers = authHeaders("application/json")
   headers.set("key", "generic-header-key")
-  headers.set("x-api-key", "caller-api-key")
+  headers.set("x-api-key", "test-key")
   headers.set("x-api-key-id", "api_key_id_123")
   headers.set("x-provider-key-id", "provider_key_id_123")
   headers.set("cookie", "session=secret")
@@ -469,8 +470,8 @@ test("redacts credential-like incoming headers without redacting non-secret IDs"
   assert.equal(report.headers.authorization, "[REDACTED]")
   assert.equal(report.headers.key, "[REDACTED]")
   assert.equal(report.headers["x-api-key"], "[REDACTED]")
-  assert.equal(report.headers["x-api-key-id"], "api_key_id_123")
-  assert.equal(report.headers["x-provider-key-id"], "provider_key_id_123")
+  assert.equal(report.headers["x-api-key-id"], "[REDACTED]")
+  assert.equal(report.headers["x-provider-key-id"], "[REDACTED]")
   assert.equal(report.headers.cookie, "[REDACTED]")
   assert.equal(report.headers["client-secret"], "[REDACTED]")
   assert.equal(report.headers["x-private-key"], "[REDACTED]")
@@ -482,8 +483,8 @@ test("redacts credential-like incoming headers without redacting non-secret IDs"
   assert.equal(report.headers["x-real-ip"], "[REDACTED]")
   assert.equal(report.headers["cf-connecting-ip"], "[REDACTED]")
   assert.equal(report.headers["true-client-ip"], "[REDACTED]")
-  assert.equal(report.headers["x-inference-key-id"], "inference_key_123")
-  assert.equal(report.headers["x-safe-header"], "safe-value")
+  assert.equal(report.headers["x-inference-key-id"], "[REDACTED]")
+  assert.equal(report.headers["x-safe-header"], "[REDACTED]")
 })
 
 test("returns usage-limit 429 without reporting a handled error or contacting provider/upstream", async () => {
@@ -538,7 +539,7 @@ test("reports handled upstream errors with searchable request context", async ()
   assert.equal(errorReport.status, 503)
 })
 
-test("reports caught upstream fetch exceptions with the original Error object", async () => {
+test("reports transport failure without free-text exception details", async () => {
   const upstreamError = new Error("socket hang up")
   const { app, reports } = createTestServer({
     fetch: async () => {
@@ -554,8 +555,8 @@ test("reports caught upstream fetch exceptions with the original Error object", 
   assert.equal(response.status, 502)
   const errorReport = requireHandledErrorReport(reports)
   assert.equal(errorReport.reason, "upstream_unreachable")
-  assert.equal(errorReport.exception, upstreamError)
-  assert.equal(errorReport.error, "socket hang up")
+  assert.equal(errorReport.exception, undefined)
+  assert.equal(errorReport.error, undefined)
   assert.equal(errorReport.organizationId, "organization_123")
   assert.equal(errorReport.inferenceKeyId, "inference_key_123")
 })
@@ -929,7 +930,7 @@ test("logs a rejected row for model_not_found", async () => {
   assert.equal(row.status, 404)
   assert.equal(row.protocol, "openai_chat")
   assert.equal(row.requested_model, "openwork/unknown-model")
-  assert.equal(row.upstream_model, null)
+  assert.equal(row.upstream_model, "openwork/unknown-model")
   assert.equal(row.stream, true)
   assert.equal(row.usage_source, "missing")
   assert.equal(row.upstream_host, "upstream.test")
@@ -1010,6 +1011,7 @@ test("logs upstream_error for a non-2xx upstream response", async () => {
   }))
 
   assert.equal(response.status, 503)
+  await response.arrayBuffer()
   const row = await waitForRows(logRows)
   assert.equal(row.outcome, "upstream_error")
   assert.equal(row.status, 503)
