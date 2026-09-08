@@ -51,8 +51,8 @@ export function safeAccessUrl(input: string) {
 
 export const inferenceAccessLogger = createMiddleware(async (c, next) => {
   const url = safeAccessUrl(c.req.url)
-  console.log("[inference-access] request", c.req.method, url)
-  try { await next() } finally { console.log("[inference-access] response", c.req.method, url, c.res.status) }
+  console.log("[gateway-access] request", c.req.method, url)
+  try { await next() } finally { console.log("[gateway-access] response", c.req.method, url, c.res.status) }
 })
 
 export function safeInferenceReporter(reporter: InferenceReporter): InferenceReporter {
@@ -103,7 +103,7 @@ function reportAttributes(report: InferenceRequestReport | InferenceHandledError
 export const sentryInferenceReporter: InferenceReporter = {
   request(report) {
     if (!shouldEmitSentryLog("info")) return
-    Sentry.logger.info("OpenWork chat completions inference request", {
+    Sentry.logger.info("OpenWork Gateway chat completions request", {
       ...reportAttributes(report), payloadMode: report.payloadMode, payload: report.payload,
     })
   },
@@ -112,9 +112,9 @@ export const sentryInferenceReporter: InferenceReporter = {
       ...reportAttributes(report), reason: report.reason, status: report.status,
       upstreamUrl: report.upstreamUrl ? safeAccessUrl(report.upstreamUrl) : undefined,
     }
-    if (shouldEmitSentryLog("error")) Sentry.logger.error("OpenWork inference handled error", attributes)
+    if (shouldEmitSentryLog("error")) Sentry.logger.error("OpenWork Gateway handled error", attributes)
     // Exceptions often contain request/SQL parameters. Never send them to Sentry.
-    Sentry.captureMessage(`OpenWork inference handled error: ${report.reason}`, {
+    Sentry.captureMessage(`OpenWork Gateway handled error: ${report.reason}`, {
       level: "error",
       tags: { organization_id: report.organizationId, inference_key_id: report.inferenceKeyId, openwork_request_id: report.openworkRequestId, route: report.route, method: report.method },
       contexts: { inference: attributes },
