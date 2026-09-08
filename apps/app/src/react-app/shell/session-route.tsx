@@ -3755,6 +3755,9 @@ export function SessionRoute() {
         if (modelPickerSessionId) {
           const store = useSessionModelStore.getState();
           store.setModel(modelPickerSessionId, model, value);
+          // setModel deliberately preserves same-model choices; an explicit
+          // settings edit must update the variant through its own action.
+          store.setVariant(modelPickerSessionId, value);
         }
         local.setPrefs((previous) => ({ ...previous, modelVariant: value }));
       }}

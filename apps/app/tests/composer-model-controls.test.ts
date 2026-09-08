@@ -41,6 +41,7 @@ describe("composer model controls", () => {
     expect(fullPicker).toContain('target="session"');
     expect(fullPicker).toContain("currentBehaviorValue={modelPickerSelection");
     expect(fullPicker).toContain("store.setModel(modelPickerSessionId, model, value)");
+    expect(fullPicker).toContain("store.setVariant(modelPickerSessionId, value)");
     const behaviorCallback = fullPicker.slice(fullPicker.indexOf("onBehaviorChange="), fullPicker.indexOf("onToggleProvider="));
     expect(behaviorCallback).toContain("modelVariant: value");
     expect(behaviorCallback).not.toContain("defaultModel:");
