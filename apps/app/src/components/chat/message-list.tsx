@@ -865,10 +865,10 @@ const MessageComponent = React.memo(
 
 MessageComponent.displayName = "MessageComponent"
 
-const LoadingMessage = React.memo(({ elapsedSeconds }: { elapsedSeconds: number }) => (
+const LoadingMessage = React.memo(({ elapsedSeconds, starting }: { elapsedSeconds: number; starting: boolean }) => (
     <Message className="mx-auto flex w-full max-w-3xl flex-col items-start gap-2 px-2 md:px-10">
-      <div data-loading-message="working" className="py-1 text-sm text-muted-foreground">
-        <span className="ow-text-shimmer tabular-nums">Working {formatElapsedSeconds(elapsedSeconds)}</span>
+      <div role={starting ? "status" : undefined} data-loading-message={starting ? "starting" : "working"} className="py-1 text-sm text-muted-foreground">
+        <span className="ow-text-shimmer tabular-nums">{starting ? "Starting…" : `Working ${formatElapsedSeconds(elapsedSeconds)}`}</span>
       </div>
     </Message>
 ))
@@ -1466,7 +1466,7 @@ export function shouldShowRunReconnecting(status: ThreadStatus, syncDegraded: bo
 
 export function MessageList({ messages, status, activityStatus, retryStatus, syncHealth }: MessageListProps) {
   const isStreaming = status === "streaming" || status === "retrying"
-  const runActive = status === "submitted" || status === "streaming" || status === "retrying"
+  const runActive = status === "streaming" || status === "retrying"
   const syncDegraded = syncHealth?.degraded === true
   const runStartedAtRef = React.useRef<number | null>(null)
   const [runElapsedSeconds, setRunElapsedSeconds] = React.useState(0)
@@ -1511,8 +1511,9 @@ export function MessageList({ messages, status, activityStatus, retryStatus, syn
     [messages],
   )
   const hasVisibleToolActivity = latestAssistantToolParts.some(isToolPartInFlight)
-  const showReconnecting = shouldShowRunReconnecting(status, syncDegraded)
-  const showLoading = !showReconnecting && shouldShowMessageListLoading(status, messages.length, hasVisibleToolActivity)
+  const starting = status === "submitted"
+  const showReconnecting = !starting && shouldShowRunReconnecting(status, syncDegraded)
+  const showLoading = starting || (!showReconnecting && shouldShowMessageListLoading(status, messages.length, hasVisibleToolActivity))
   const currentToolCallIds = React.useMemo(
     () => new Set(latestAssistantToolParts.map((part) => part.toolCallId)),
     [latestAssistantToolParts],
@@ -1553,7 +1554,7 @@ export function MessageList({ messages, status, activityStatus, retryStatus, syn
         )
         })}
 
-        {showLoading && <LoadingMessage elapsedSeconds={runElapsedSeconds} />}
+        {showLoading && <LoadingMessage elapsedSeconds={runElapsedSeconds} starting={starting} />}
         {showReconnecting && <ReconnectingMessage lastConfirmedAt={syncHealth?.lastConfirmedAt ?? null} />}
         {retryStatus ? <RetryMessage status={retryStatus} /> : null}
         {error && !hasSessionErrorMessage ? <ErrorMessage error={error} /> : null}

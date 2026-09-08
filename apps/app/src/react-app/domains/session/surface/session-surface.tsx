@@ -1308,12 +1308,9 @@ export function SessionSurface(props: SessionSurfaceProps) {
     if (!chatStreaming) setSteering(false);
   }, [chatStreaming]);
   const [evalThreadStatus, setEvalThreadStatus] = useState<ThreadStatus | null>(null);
+  const autoSending = hasComposerAutoSend(props.sessionId) && !sessionModelUnavailable;
   const status = useMemo((): ThreadStatus => {
     if (evalThreadStatus) return evalThreadStatus;
-    if (sending) {
-      return "submitted";
-    }
-
     if (liveStatus.type === "busy") {
       return "streaming";
     }
@@ -1322,8 +1319,12 @@ export function SessionSurface(props: SessionSurfaceProps) {
       return "retrying";
     }
 
+    if (sending || autoSending) {
+      return "submitted";
+    }
+
     return "ready";
-  }, [evalThreadStatus, liveStatus, sending]);
+  }, [autoSending, evalThreadStatus, liveStatus, sending]);
   const [evalMarkdownMessages, setEvalMarkdownMessages] = useState<UIMessage[]>(EMPTY_TRANSCRIPT);
   useEffect(() => {
     setEvalMarkdownMessages(EMPTY_TRANSCRIPT);
@@ -1336,7 +1337,6 @@ export function SessionSurface(props: SessionSurfaceProps) {
   );
   const pendingMessages = useComposerStateStore((state) => state.pendingMessages[sessionOwner]);
   const failedDraft = useComposerStateStore((state) => state.failedDrafts[sessionOwner]?.[0]);
-  const autoSending = hasComposerAutoSend(props.sessionId) && !sessionModelUnavailable;
   const unmatchedPendingMessages = useMemo(() => {
     const matchedIds = new Set<string>();
     const remaining = (pendingMessages ?? []).filter(({ draft: pending, previousMessageIds }) => {

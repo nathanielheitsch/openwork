@@ -301,6 +301,7 @@ export function NewTaskComposer(props: NewTaskComposerProps) {
         ))}
       </div> : null}
     </div> : null}
+    {pendingPrompt !== null ? <div role="status" data-loading-message="starting" className="mb-4 text-sm text-muted-foreground">Starting…</div> : null}
     {submissionError ? <div role="alert" className="mb-2 text-sm text-red-11">{submissionError}</div> : null}
     {failedSubmission ? <button type="button" disabled={Boolean(props.draft || attachments.length)} className="mb-2 text-sm disabled:opacity-50" onClick={() => {
       props.onDraftChange(failedSubmission.text);
