@@ -49,9 +49,17 @@ function installMenuOverlayDismissListeners() {
   }
 }
 
-// Capture before message-bubble menus, but leave files, app routes, editable
-// text, and ordinary clicks to their existing handlers.
+// Let Chromium request the native editing menu before message-bubble menus
+// consume the event. Unselected links keep their existing destination menu.
 window.addEventListener("contextmenu", (event) => {
+  const editable = event.composedPath().some((node) =>
+    node instanceof HTMLElement && (
+      node.isContentEditable || node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement
+    ));
+  if (editable || window.getSelection()?.toString()) {
+    event.stopImmediatePropagation();
+    return;
+  }
   const anchor = event.composedPath().find((node) => node instanceof HTMLAnchorElement);
   if (!anchor || anchor.isContentEditable || anchor.hasAttribute("download")) return;
   const href = anchor.getAttribute("href") ?? "";

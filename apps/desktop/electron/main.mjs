@@ -102,6 +102,7 @@ const {
   BrowserWindow,
   dialog,
   ipcMain,
+  Menu,
   nativeImage,
   nativeTheme,
   net: electronNet,
@@ -2531,6 +2532,24 @@ async function createMainWindow() {
     await applyCachedBrandIcon(cachedBrandImage, bootSourceUrl);
   }
   applicationMenu.applyVisibility(mainWindow);
+
+  mainWindow.webContents.on("context-menu", (_event, params) => {
+    const items = [];
+    if (params.isEditable) {
+      items.push({ role: "cut", enabled: params.editFlags.canCut });
+    }
+    if (params.isEditable || params.selectionText) {
+      items.push({ role: "copy", enabled: params.editFlags.canCopy });
+    }
+    if (params.isEditable) {
+      items.push(
+        { role: "paste", enabled: params.editFlags.canPaste },
+        { type: "separator" },
+        { role: "selectAll", enabled: params.editFlags.canSelectAll },
+      );
+    }
+    if (items.length > 0) Menu.buildFromTemplate(items).popup({ window: mainWindow });
+  });
 
   mainWindow.on("page-title-updated", (event) => {
     event.preventDefault();
