@@ -39,6 +39,14 @@ describe("composer model controls", () => {
     const sessionRouteSource = readFileSync(sessionRoutePath, "utf8");
     const fullPicker = sessionRouteSource.slice(sessionRouteSource.indexOf("<ModelPickerModal"));
     expect(fullPicker).toContain('target="session"');
+    expect(fullPicker).toContain("currentBehaviorValue={modelPickerSelection");
+    expect(fullPicker).toContain("store.setModel(modelPickerSessionId, model, value)");
+    const behaviorCallback = fullPicker.slice(fullPicker.indexOf("onBehaviorChange="), fullPicker.indexOf("onToggleProvider="));
+    expect(behaviorCallback).toContain("modelVariant: value");
+    expect(behaviorCallback).not.toContain("defaultModel:");
+    const favoriteCycle = sessionRouteSource.slice(sessionRouteSource.indexOf("const cycleFavoriteModel ="), sessionRouteSource.indexOf("const cycleFavoriteModelControlAction"));
+    expect(favoriteCycle).toContain("sanitizeModelBehaviorValue(next.providerID, providerModel, selection ? selection.variant : modelVariantValue)");
+    expect(favoriteCycle).not.toContain("getModelBehaviorSummary");
   });
 
   test("tracks steering until the active run stops streaming", () => {

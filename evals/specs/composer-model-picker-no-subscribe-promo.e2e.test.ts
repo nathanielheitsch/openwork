@@ -82,11 +82,21 @@ test("managed model discovery keeps the task unchanged until an explicit eligibl
     await user.see({ ...luna, label: `${world.luna.displayName}, Free, current model` });
     await user.click({ role: "button", label: /^Thinking and effort for .*Luna/ });
     await user.see({ role: "button", label: "Back to models" });
+    await user.see({ role: "button", label: "Default" });
+    expect((await probe.dom('[data-slot="model-thinking-submenu"] button[aria-pressed="true"]')).elements.map((element) => element.text)).toEqual(["Default"]);
     await user.see({ role: "button", label: "Low" });
     await user.click({ role: "button", label: "Low" });
     await user.see({ role: "button", label: "Change model" }, { text: /Luna[\s\S]*Low/ });
     await user.notSee({ testId: "inference-upgrade-dialog" });
     await user.click({ role: "button", label: "Change model" });
+    await user.click({ role: "button", label: /^Thinking and effort for .*Luna/ });
+    expect((await probe.dom('[data-slot="model-thinking-submenu"] button[aria-pressed="true"]')).elements.map((element) => element.text)).toEqual(["Low"]);
+    await user.click({ role: "button", label: "Default" });
+    await user.see({ role: "button", label: "Change model" }, { text: /Luna[\s\S]*Default/ });
+    await user.click({ role: "button", label: "Change model" });
+    await user.click({ role: "button", label: /^Thinking and effort for .*Luna/ });
+    expect((await probe.dom('[data-slot="model-thinking-submenu"] button[aria-pressed="true"]')).elements.map((element) => element.text)).toEqual(["Default"]);
+    await user.click({ role: "button", label: "Back to models" });
     await onlyManagedRows("managed-model-picker");
     // Show the managed scenario with Luna selected, not the fixture's retained
     // legacy default. This capture is supplementary to the observable assertions.
@@ -111,6 +121,10 @@ test("managed model discovery keeps the task unchanged until an explicit eligibl
     await user.notSee({ role: "button", label: "Subscribe" });
     await user.notSee({ testId: "inference-upgrade-dialog" });
     await user.see({ ...luna, label: `${world.luna.displayName}, Free, current model` });
+    await user.click({ role: "button", label: "Low" });
+    expect((await probe.dom('[data-testid="current-model-settings"] button[aria-pressed="true"]')).elements.map((element) => element.text)).toEqual(["Low"]);
+    await user.click({ role: "button", label: "Default" });
+    expect((await probe.dom('[data-testid="current-model-settings"] button[aria-pressed="true"]')).elements.map((element) => element.text)).toEqual(["Default"]);
     await user.type(search, world.astra.summary, { replace: true });
     await user.see(astra, { text: contains(world.astra.summary) });
     await user.see({ ...astra, label: `${world.astra.displayName}, Upgrade, opens upgrade options without changing your model` });

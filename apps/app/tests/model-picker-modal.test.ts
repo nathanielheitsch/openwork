@@ -2,6 +2,8 @@ import { afterAll, describe, expect, spyOn, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, createElement, useState } from "react";
 import type { InferenceAccess } from "@openwork/types/den/inference";
+import type { CreateAutomation } from "@openwork/types/automations";
+import type { AutomationProviderCatalog, AutomationModelOption } from "../src/react-app/domains/automations/automation-model-options";
 import type { ModelOption, ModelRef } from "../src/app/types";
 import * as den from "../src/app/lib/den";
 import type { DenAuthStore } from "../src/react-app/domains/cloud/den-auth-provider";
@@ -31,7 +33,7 @@ const {
 const modelOption = (modelID: string, providerID = "openwork", title = modelID): ModelOption => ({
   providerID, modelID, title, description: providerID,
   behaviorTitle: "Effort", behaviorLabel: "Default", behaviorDescription: "", behaviorValue: null,
-  behaviorOptions: [{ value: "low", label: "Low", description: "" }, { value: "high", label: "High", description: "" }],
+  behaviorOptions: [{ value: null, label: "Default", description: "" }, { value: "low", label: "Low", description: "" }, { value: "high", label: "High", description: "" }],
   isFree: false,
 });
 
@@ -273,11 +275,16 @@ test("managed compact picker hides own models without changing stored choices an
   const favorites = [paidModel, ownModel, starter];
   const recent = [freeModel, ownModel, starter];
   useModelCollectionsStore.setState({ favorites, recent });
+  let setSavedVariant: (value: string | null) => void = () => { throw new Error("Picker not mounted"); };
   function Picker() {
     const [open, setOpen] = useState(false);
     const [value, setValue] = useState<ModelRef>(starter);
+    const [variant, setVariant] = useState<string | null>(null);
+    setSavedVariant = setVariant;
     return createElement(ModelSelect, { open, onOpenChange: setOpen, value, fallbackOptions: availableOptions,
-      onChange: (model) => { selected.push(model); setValue(model); }, onBehaviorChange: (value) => behaviors.push(value),
+      behaviorValue: variant,
+      onChange: (model, variant) => { selected.push(model); setValue(model); if (variant !== undefined) setVariant(variant); },
+      onBehaviorChange: (value) => { behaviors.push(value); setVariant(value); },
     });
   }
   const host = document.createElement("div");
@@ -357,11 +364,40 @@ test("managed compact picker hides own models without changing stored choices an
     await click('[aria-label="Thinking and effort for Fixture Free"]');
     expect(document.querySelector('[data-slot="model-thinking-submenu"]')).not.toBeNull();
     expect(document.activeElement?.getAttribute("aria-label")).toBe("Back to models");
+    expect(document.querySelector('[data-slot="model-thinking-submenu"] [aria-pressed="true"]')?.textContent).toBe("Default");
     const effort = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-slot="model-thinking-submenu"] button')).find((button) => button.textContent === "High");
     if (!effort) throw new Error("Missing selected model effort option");
     await act(async () => effort.click());
     expect(behaviors).toEqual(["high"]);
     expect(selected.length).toBe(1);
+    await click('[aria-label="Change model"]');
+    await click('[aria-label="Thinking and effort for Fixture Free"]');
+    expect(document.querySelector('[data-slot="model-thinking-submenu"] [aria-pressed="true"]')?.textContent).toBe("High");
+    const defaultEffort = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-slot="model-thinking-submenu"] button')).find((button) => button.textContent === "Default");
+    if (!defaultEffort) throw new Error("Missing Default recovery control");
+    await act(async () => defaultEffort.click());
+    expect(behaviors).toEqual(["high", null]);
+    await click('[aria-label="Change model"]');
+    await click('[aria-label="Thinking and effort for Fixture Free"]');
+    expect(document.querySelector('[data-slot="model-thinking-submenu"] [aria-pressed="true"]')?.textContent).toBe("Default");
+    await click('[aria-label="Back to models"]');
+    await click('[aria-label="Change model"]');
+    await act(async () => {
+      setSavedVariant("retired-effort");
+      availableOptions = options.map((option) => option === freeModel ? { ...option, behaviorOptions: [] } : option);
+      render();
+    });
+    await click('[aria-label="Change model"]');
+    expect(document.querySelector('[data-testid="selected-model-detail"]')?.textContent).toContain("not in current catalog");
+    await click('[aria-label="Thinking and effort for Fixture Free"]');
+    expect(document.querySelector('[data-slot="model-thinking-submenu"] [role="status"]')?.textContent).toContain("kept unchanged");
+    expect(document.querySelector('[data-slot="model-thinking-submenu"] [aria-pressed="true"]')).toBeNull();
+    expect(document.querySelector('[data-slot="model-thinking-submenu"]')?.textContent).toContain("Default");
+    expect(behaviors).toEqual(["high", null]);
+    expect(selected.length).toBe(1);
+    await click('[aria-label="Back to models"]');
+    await click('[aria-label="Change model"]');
+    availableOptions = options;
     await click('[aria-label="Change model"]');
     expect(document.querySelector<HTMLButtonElement>('[aria-label="Cycle favorite models"]')?.disabled).toBe(true);
     await click('[aria-label="Cycle favorite models"]');
@@ -393,6 +429,17 @@ test("managed compact picker hides own models without changing stored choices an
     expect(localStorage.getItem(MODEL_PREF_KEY)).toBe(storedPreference);
     await click('[data-testid="model-option-opencode-big-pickle"]');
     expect(selected[1]).toEqual({ providerID: starter.providerID, modelID: starter.modelID });
+    // A favorite switch must not use a target's default summary to preserve a
+    // stale source effort, even when the provider IDs differ.
+    availableOptions = [starter, { ...ownModel, behaviorValue: "high", behaviorOptions: [{ value: "low", label: "Low", description: "" }] }];
+    authSpy.mockReturnValue({ status: "signed_in", user: null, verifiedIdentity: { principalId: "fixture", organizationId: "fixture" }, isSignedIn: true, error: null, refresh: async () => undefined });
+    inferenceSpy.mockReturnValue({ access: null, pickerRequest: null, showUpgrade: () => undefined, checkSelection: () => true });
+    await act(async () => { setSavedVariant("retired-effort"); render(); });
+    await click('[aria-label="Change model"]');
+    await click('[aria-label="Cycle favorite models"]');
+    expect(selected[2]).toEqual({ providerID: ownModel.providerID, modelID: ownModel.modelID });
+    expect(behaviors.at(-1)).toBeNull();
+    expect(document.querySelector('[aria-label="Change model"]')?.textContent).toContain("Default");
   } finally {
     await act(async () => root.unmount());
     host.remove();
@@ -514,6 +561,93 @@ test("full session catalogs contain only hosted models while default/provider se
     inferenceSpy.mockRestore();
     useModelCollectionsStore.setState({ favorites: previousCollections.favorites, recent: previousCollections.recent });
     window.removeEventListener("keydown", onGlobalShortcut);
+  }
+});
+
+test("Automation settings preserve a stale choice, allow Default recovery, and save only on explicit submission", async () => {
+  const { AutomationEditor } = await import("../src/react-app/domains/automations/automation-editor");
+  const inferenceModule = await import("../src/react-app/domains/cloud/inference-access-provider");
+  const authSpy = spyOn(auth, "useDenAuth").mockReturnValue({ status: "signed_out", user: null, verifiedIdentity: null, isSignedIn: false, error: null, refresh: async () => undefined });
+  const restrictionSpy = spyOn(desktopConfig, "useCheckDesktopRestriction").mockImplementation(() => () => false);
+  const inferenceSpy = spyOn(inferenceModule, "useInferenceAccess").mockReturnValue({ access: null, pickerRequest: null, showUpgrade: () => undefined, checkSelection: () => true });
+  const modelOptions: AutomationModelOption[] = ["first", "second"].map((modelId) => ({
+    providerId: "lpr_fixture", modelId, providerName: "Fixture provider", modelName: modelId, accessKind: "authorized_custom",
+  }));
+  const catalog: AutomationProviderCatalog = { lpr_fixture: {} };
+  for (const { modelId } of modelOptions) {
+    catalog.lpr_fixture[modelId] = {
+      id: modelId, providerID: "lpr_fixture", name: modelId,
+      api: { id: modelId, url: "https://fixture.invalid", npm: "@ai-sdk/openai-compatible" },
+      capabilities: { temperature: false, reasoning: true, attachment: false, toolcall: true,
+        input: { text: true, audio: false, image: false, video: false, pdf: false },
+        output: { text: true, audio: false, image: false, video: false, pdf: false }, interleaved: false },
+      cost: { input: 0, output: 0, cache: { read: 0, write: 0 } }, limit: { context: 1, output: 1 },
+      status: "active", options: {}, headers: {}, release_date: "2026-01-01",
+      variants: modelId === "first" ? { low: {}, high: {} } : { low: {} },
+    };
+  }
+  const initial: CreateAutomation = {
+    name: "Saved instructions", instructions: "Keep these instructions unchanged.",
+    schedule: { kind: "daily", timezone: "UTC", hour: 9, minute: 0 },
+    model: { providerId: "lpr_fixture", modelId: "first", variant: "retired" },
+  };
+  let providerCatalog = catalog;
+  const saved: CreateAutomation[] = [];
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const render = () => root.render(createElement(PlatformProvider, { value: createDefaultPlatform(), children:
+    createElement(AutomationEditor, { initial, initialKey: "revision-one", placement: "desktop", modelOptions,
+      providerCatalog, busy: false, openModelPickerOnMount: true, submitLabel: "Save automation",
+      onCancel: () => undefined, onSave: (input) => { saved.push(input); } }) }));
+  const click = async (selector: string) => {
+    const control = document.querySelector<HTMLElement>(selector);
+    if (!control) throw new Error(`Missing Automation control: ${selector}`);
+    await act(async () => control.click());
+  };
+  const effort = async (label: string) => {
+    const control = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-testid="current-model-settings"] button')).find((button) => button.textContent === label);
+    if (!control) throw new Error(`Missing Automation effort: ${label}`);
+    await act(async () => control.click());
+    expect(document.querySelector('[data-testid="current-model-settings"] [aria-pressed="true"]')?.textContent).toBe(label);
+    expect(saved).toEqual([]);
+  };
+  try {
+    await act(async () => render());
+    expect(document.querySelector('[data-testid="current-model-settings"]')?.textContent).toContain('"retired" (not in current catalog)');
+    expect(document.querySelector('[data-testid="current-model-settings"] [role="status"]')?.textContent).toContain("kept unchanged");
+    expect(document.querySelector('[data-testid="current-model-settings"] [aria-pressed="true"]')).toBeNull();
+    await click('[data-testid="model-option-lpr_fixture-first"]');
+    expect(document.querySelector("#automation-model")?.textContent).toContain("retired");
+    await click("#automation-model");
+    await effort("Default");
+    await effort("High");
+    // A catalog refresh cannot discard the editor's draft, even with no effort metadata.
+    providerCatalog = {};
+    await act(async () => render());
+    expect(document.querySelector('[data-testid="current-model-settings"]')?.textContent).toContain('"high" (not in current catalog)');
+    expect(document.querySelectorAll('[data-testid="current-model-settings"] button')).toHaveLength(1);
+    await effort("Default");
+    providerCatalog = catalog;
+    await act(async () => render());
+    await effort("High");
+    await click('[data-testid="model-option-lpr_fixture-second"]');
+    await click("#automation-model");
+    expect(document.querySelector('[data-testid="current-model-settings"] [aria-pressed="true"]')?.textContent).toBe("Default");
+    expect(document.querySelector('[data-testid="current-model-settings"]')?.textContent).not.toContain("High");
+    expect(initial.model.variant).toBe("retired");
+    expect(saved).toEqual([]);
+    const done = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Done");
+    if (!done) throw new Error("Missing Done button");
+    await act(async () => done.click());
+    await click('[data-automation-editor] button[type="submit"]');
+    expect(saved).toEqual([{ ...initial, model: { providerId: "lpr_fixture", modelId: "second", variant: null } }]);
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    authSpy.mockRestore();
+    restrictionSpy.mockRestore();
+    inferenceSpy.mockRestore();
   }
 });
 

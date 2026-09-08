@@ -20,6 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { t } from "@/i18n";
 import { readDenSettings } from "@/app/lib/den";
+import { getModelBehaviorSelection } from "@/app/lib/model-behavior";
 import { modelEquals, resolveProviderDisplayName } from "../../../../app/utils";
 import type { ModelOption, ModelRef } from "../../../../app/types";
 import { ProviderIcon } from "../../../design-system/provider-icon";
@@ -53,6 +54,7 @@ export type ModelPickerModalProps = {
   target: "default" | "session";
   sessionId?: string;
   current: ModelRef;
+  currentBehaviorValue?: string | null;
   onSelect: (model: ModelRef) => void;
   onBehaviorChange: (model: ModelRef, value: string | null) => void;
   onToggleProvider?: (providerId: string, enabled: boolean) => void;
@@ -139,6 +141,9 @@ export function ModelPickerModal(props: ModelPickerModalProps) {
     () => new Set(props.disabledProviders ?? []),
     [props.disabledProviders],
   );
+  const currentOption = options.find((option) => modelEquals(option, props.current));
+  const currentBehavior = getModelBehaviorSelection(currentOption?.behaviorOptions ?? [],
+    props.currentBehaviorValue !== undefined ? props.currentBehaviorValue : currentOption?.behaviorValue ?? null);
 
   // Reset on open
   useEffect(() => {
@@ -355,6 +360,22 @@ export function ModelPickerModal(props: ModelPickerModalProps) {
 
           {/* Content */}
           <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1 -mr-1">
+            {currentOption && !currentOption.disabled && !disabledSet.has(currentOption.providerID) ? (
+              <section aria-label={`Settings for ${currentOption.title}`} className="mb-3 rounded-xl border border-dls-border p-3" data-testid="current-model-settings">
+                <div className="text-xs font-medium">{currentOption.title} · {currentBehavior.label}</div>
+                <p role="status" className="mt-1 text-xs text-muted-foreground">{currentBehavior.description}</p>
+                <div role="group" aria-label="Thinking and effort" className="mt-2 flex flex-wrap gap-2">
+                  {currentBehavior.options.map((option) => (
+                    <Button key={option.value === null ? "default" : `variant-${option.value}`} type="button" size="sm"
+                      variant={option.value === currentBehavior.value ? "secondary" : "outline"}
+                      aria-pressed={option.value === currentBehavior.value}
+                      onClick={() => props.onBehaviorChange(props.current, option.value)}>
+                      {option.label}
+                    </Button>
+                  ))}
+                </div>
+              </section>
+            ) : null}
             {emptyState ? (
               <div className="space-y-3 rounded-2xl border border-dls-border bg-dls-hover/30 px-4 py-6 text-center">
                 <div className="text-sm text-dls-secondary">
