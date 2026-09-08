@@ -110,7 +110,10 @@ test("managed model discovery keeps the task unchanged until an explicit eligibl
     await user.click({ role: "button", label: "Change model" });
     await user.click({ role: "button", label: "See all OpenWork models" });
     await user.see({ testId: "all-models-picker" });
-    await user.see({ role: "heading", label: "OpenWork models" });
+    // The current target helper does not infer heading roles. Keep both visible
+    // copy and semantic h2 assertions rather than changing the product markup.
+    await user.see({ text: "OpenWork models" });
+    expect((await probe.dom('[data-testid="all-models-picker"] h2')).elements.map((element) => element.text)).toContain("OpenWork models");
     await onlyManagedRows("all-models-picker");
     await user.see({ text: "Select a model for this session." });
     await user.see(search);
